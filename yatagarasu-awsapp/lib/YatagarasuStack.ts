@@ -1,13 +1,14 @@
-import { CfnOutput, RemovalPolicy, ScopedAws, Stack, StackProps } from "aws-cdk-lib";
+import { RemovalPolicy, ScopedAws, Stack, StackProps } from "aws-cdk-lib";
 import { Certificate } from "aws-cdk-lib/aws-certificatemanager";
 import { AllowedMethods, CachePolicy, CfnDistribution, CfnOriginAccessControl, Distribution, OriginRequestPolicy, ResponseHeadersPolicy } from "aws-cdk-lib/aws-cloudfront";
 import { FunctionUrlOrigin, S3Origin } from "aws-cdk-lib/aws-cloudfront-origins";
+import { Mfa, OAuthScope, UserPool } from "aws-cdk-lib/aws-cognito";
 import { Effect, PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
 import { Alias, Architecture, FunctionUrlAuthType, InvokeMode, LoggingFormat, Runtime } from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { ARecord, PublicHostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
-import { CloudFrontTarget } from "aws-cdk-lib/aws-route53-targets";
+import { CloudFrontTarget, UserPoolDomainTarget } from "aws-cdk-lib/aws-route53-targets";
 import { BlockPublicAccess, Bucket } from "aws-cdk-lib/aws-s3";
 import { BucketDeployment, Source } from "aws-cdk-lib/aws-s3-deployment";
 import { Construct } from "constructs";
@@ -27,6 +28,37 @@ export class YatagarasuStack extends Stack {
         });
         const www = "www";
         const auth = "auth";
+
+        // ==========
+        // Authentication
+        // ==========
+        const userpool = new UserPool(this, 'userpool', {
+            selfSignUpEnabled: false,
+            signInAliases: { username: false, email: true, phone: false, preferredUsername: false },
+            autoVerify: { email: true, phone: true, },
+            standardAttributes: { email: { mutable: false, required: true }, },
+            mfa: Mfa.OFF,
+        });
+        const authDomain = userpool.addDomain('domain', {
+            customDomain: {
+                domainName: `${auth}.${hostedzone.zoneName}`,
+                certificate: certificate,
+            },
+        });
+        const authClient = userpool.addClient('client', {
+            generateSecret: true,
+            oAuth: {
+                flows: { authorizationCodeGrant: true, implicitCodeGrant: false },
+                scopes: [OAuthScope.EMAIL, OAuthScope.OPENID],
+                callbackUrls: [`https://${www}.${hostedzone.zoneName}/oauth2/idpresponse`, ],
+            },
+        });
+
+        new ARecord(authDomain, 'record', {
+            zone: hostedzone,
+            recordName: auth,
+            target: RecordTarget.fromAlias(new UserPoolDomainTarget(authDomain)),
+        });
 
         // ==========
         // Static contents for Webapp
@@ -138,16 +170,19 @@ export class YatagarasuStack extends Stack {
             }
         }));
 
-        // ==========
-        // Outputs
-        // ==========
-        const wwwRecord = new ARecord(this, 'wwwrecord', {
+        new ARecord(distribution, 'record', {
             zone: hostedzone,
             recordName: www,
             target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
         });
-        new CfnOutput(this, 'endpoint', {
-            value: `https://${wwwRecord.domainName}`
-        });
+
+        // ==========
+        // Outputs
+        // ==========
+        /*
+         new CfnOutput(this, 'endpoint', {
+             value: `https://${wwwRecord.domainName}`
+         });
+         */
     }
 }
