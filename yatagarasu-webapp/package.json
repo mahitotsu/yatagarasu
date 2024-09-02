@@ -12,5 +12,9 @@
   "dependencies": {
     "nuxt": "^3.13.0",
     "vue": "latest"
+  },
+  "devDependencies": {
+    "@aws-lambda-powertools/parameters": "^2.7.0",
+    "@aws-sdk/client-secrets-manager": "^3.637.0"
   }
 }

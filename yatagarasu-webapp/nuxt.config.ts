@@ -3,5 +3,15 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   nitro: {
     preset: 'aws-lambda',
+    serveStatic: false,
+    minify: true,
+    inlineDynamicImports: true,
+    externals: {
+      inline: ['@aws-sdk', '@aws-lambda-powertoos']
+    }
+  },
+  runtimeConfig: {
+    authDomain: '',
+    secretName: '',
   }
 });

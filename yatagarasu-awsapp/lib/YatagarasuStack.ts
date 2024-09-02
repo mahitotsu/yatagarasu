@@ -4,13 +4,14 @@ import { AllowedMethods, CachePolicy, CfnDistribution, CfnOriginAccessControl, D
 import { FunctionUrlOrigin, S3Origin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { Mfa, OAuthScope, UserPool } from "aws-cdk-lib/aws-cognito";
 import { Effect, PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
-import { Alias, Architecture, FunctionUrlAuthType, InvokeMode, LoggingFormat, Runtime } from "aws-cdk-lib/aws-lambda";
+import { Alias, Architecture, FunctionUrlAuthType, InvokeMode, LayerVersion, LoggingFormat, Runtime } from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { ARecord, PublicHostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
 import { CloudFrontTarget, UserPoolDomainTarget } from "aws-cdk-lib/aws-route53-targets";
 import { BlockPublicAccess, Bucket } from "aws-cdk-lib/aws-s3";
 import { BucketDeployment, Source } from "aws-cdk-lib/aws-s3-deployment";
+import { Secret } from "aws-cdk-lib/aws-secretsmanager";
 import { Construct } from "constructs";
 
 export class YatagarasuStack extends Stack {
@@ -50,7 +51,7 @@ export class YatagarasuStack extends Stack {
             oAuth: {
                 flows: { authorizationCodeGrant: true, implicitCodeGrant: false },
                 scopes: [OAuthScope.EMAIL, OAuthScope.OPENID],
-                callbackUrls: [`https://${www}.${hostedzone.zoneName}/oauth2/idpresponse`, ],
+                callbackUrls: [`https://${www}.${hostedzone.zoneName}/oauth2/idpresponse`,],
             },
         });
 
@@ -58,6 +59,15 @@ export class YatagarasuStack extends Stack {
             zone: hostedzone,
             recordName: auth,
             target: RecordTarget.fromAlias(new UserPoolDomainTarget(authDomain)),
+        });
+
+        // ==========
+        // Store secret values
+        // ==========
+        const secret = new Secret(this, 'Secret', {
+            secretObjectValue: {
+                clientSecret: authClient.userPoolClientSecret,
+            }
         });
 
         // ==========
@@ -82,14 +92,23 @@ export class YatagarasuStack extends Stack {
         // ==========
         // Lambda function for Webapp
         // ==========
+        const powertools = LayerVersion.fromLayerVersionArn(this, 'powertools',
+            `arn:aws:lambda:${this.region}:094274105915:layer:AWSLambdaPowertoolsTypeScriptV2:12`
+        );
         const webapp = new NodejsFunction(this, 'webapp', {
             runtime: Runtime.NODEJS_20_X,
             architecture: Architecture.ARM_64,
             entry: `${__dirname}/../../yatagarasu-webapp/.output/server/index.mjs`,
+            environment: {
+                NUXT_AUTH_DOMAIN: `${auth}.${hostedzone.zoneName}`,
+                NUXT_SECRET_NAME: secret.secretName,
+            },
             bundling: {
                 minify: true,
                 sourceMap: false,
+                externalModules: ['@aws-lambda-powertools/*', '@aws-sdk/*',],
             },
+            layers: [powertools],
             memorySize: 1024,
             loggingFormat: LoggingFormat.JSON,
             logGroup: new LogGroup(this, 'webapp-loggroup', {
@@ -105,6 +124,8 @@ export class YatagarasuStack extends Stack {
             authType: FunctionUrlAuthType.AWS_IAM,
             invokeMode: InvokeMode.BUFFERED,
         });
+
+        secret.grantRead(current);
 
         // ==========
         // Distribution of webapp
