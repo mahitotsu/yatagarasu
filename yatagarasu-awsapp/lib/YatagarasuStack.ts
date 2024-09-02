@@ -1,4 +1,4 @@
-import { RemovalPolicy, ScopedAws, Stack, StackProps } from "aws-cdk-lib";
+import { RemovalPolicy, ScopedAws, SecretValue, Stack, StackProps } from "aws-cdk-lib";
 import { Certificate } from "aws-cdk-lib/aws-certificatemanager";
 import { AllowedMethods, CachePolicy, CfnDistribution, CfnOriginAccessControl, Distribution, OriginRequestPolicy, ResponseHeadersPolicy } from "aws-cdk-lib/aws-cloudfront";
 import { FunctionUrlOrigin, S3Origin } from "aws-cdk-lib/aws-cloudfront-origins";
@@ -46,16 +46,17 @@ export class YatagarasuStack extends Stack {
                 certificate: certificate,
             },
         });
+        const callbackUrl = `https://${www}.${hostedzone.zoneName}/oauth2/idpresponse`;
         const authClient = userpool.addClient('client', {
             generateSecret: true,
             oAuth: {
                 flows: { authorizationCodeGrant: true, implicitCodeGrant: false },
                 scopes: [OAuthScope.EMAIL, OAuthScope.OPENID],
-                callbackUrls: [`https://${www}.${hostedzone.zoneName}/oauth2/idpresponse`,],
+                callbackUrls: [callbackUrl],
             },
         });
 
-        new ARecord(authDomain, 'record', {
+        const authRecord = new ARecord(authDomain, 'record', {
             zone: hostedzone,
             recordName: auth,
             target: RecordTarget.fromAlias(new UserPoolDomainTarget(authDomain)),
@@ -67,7 +68,10 @@ export class YatagarasuStack extends Stack {
         const secret = new Secret(this, 'Secret', {
             secretObjectValue: {
                 clientSecret: authClient.userPoolClientSecret,
-            }
+                clientId: SecretValue.unsafePlainText(authClient.userPoolClientId),
+                callbackUrl: SecretValue.unsafePlainText(callbackUrl),
+            },
+            removalPolicy: RemovalPolicy.DESTROY,
         });
 
         // ==========
@@ -100,6 +104,7 @@ export class YatagarasuStack extends Stack {
             architecture: Architecture.ARM_64,
             entry: `${__dirname}/../../yatagarasu-webapp/.output/server/index.mjs`,
             environment: {
+                NUXT_WEB_DOMAIN: `${www}.${hostedzone.zoneName}`,
                 NUXT_AUTH_DOMAIN: `${auth}.${hostedzone.zoneName}`,
                 NUXT_SECRET_NAME: secret.secretName,
             },
@@ -196,14 +201,5 @@ export class YatagarasuStack extends Stack {
             recordName: www,
             target: RecordTarget.fromAlias(new CloudFrontTarget(distribution)),
         });
-
-        // ==========
-        // Outputs
-        // ==========
-        /*
-         new CfnOutput(this, 'endpoint', {
-             value: `https://${wwwRecord.domainName}`
-         });
-         */
     }
 }

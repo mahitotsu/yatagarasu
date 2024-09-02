@@ -10,13 +10,33 @@ export default defineEventHandler(async (event) => {
     }
 
     const { authDomain, secretName } = useRuntimeConfig(event);
-    const tokenEndpoint = `https://${authDomain}/oauth2/token`;
-
-    const { clientSecret } = await getSecret(secretName, { transform: 'json' }) as {
+    const { clientSecret, clientId, callbackUrl } = await getSecret(secretName, { transform: 'json' }) as {
         clientSecret: string;
+        clientId: string;
+        callbackUrl: string;
+    };
+
+    const tokenEndpoint = `https://${authDomain}/oauth2/token`;
+    const { id_token, access_token, token_type, expires_in } = await $fetch(tokenEndpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': 'Basic ' + btoa(`${clientId}:${clientSecret}`),
+        },
+        body: [
+            `grant_type=authorization_code`,
+            `code=${code}`,
+            `redirect_uri=${callbackUrl}`
+        ].join('&'),
+    }) as {
+        id_token: string;
+        access_token: string;
+        refresh_token: string;
+        token_type: string;
+        expires_in: number;
     };
 
     return JSON.stringify({
-        authDomain,
+        authDomain, id_token, access_token, token_type, expires_in
     }, null, 4);
 });
