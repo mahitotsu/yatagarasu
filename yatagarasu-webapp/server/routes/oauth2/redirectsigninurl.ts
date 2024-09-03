@@ -1,4 +1,5 @@
 import { getSecret } from '@aws-lambda-powertools/parameters/secrets';
+
 export default defineEventHandler(async (event) => {
 
     const { authDomain, secretName } = useRuntimeConfig(event);

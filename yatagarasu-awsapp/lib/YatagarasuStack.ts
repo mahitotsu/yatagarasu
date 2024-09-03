@@ -67,42 +67,46 @@ export class YatagarasuStack extends Stack {
         // ==========
         // Store key and secrets
         // ==========
-        const key = new Key(this, 'key', {
+        const key = new Key(this, 'cryptKey', {
             enableKeyRotation: false,
-            keySpec: KeySpec.RSA_2048,
-            keyUsage: KeyUsage.SIGN_VERIFY,
+            keySpec: KeySpec.SYMMETRIC_DEFAULT,
+            keyUsage: KeyUsage.ENCRYPT_DECRYPT,
             removalPolicy: RemovalPolicy.DESTROY,
             pendingWindow: Duration.days(7),
         });
-        const secret = new Secret(this, 'secret', {
-            secretObjectValue: {
-                clientSecret: authClient.userPoolClientSecret,
-                clientId: SecretValue.unsafePlainText(authClient.userPoolClientId),
-                callbackUrl: SecretValue.unsafePlainText(callbackUrl),
-                signingKeyId: SecretValue.unsafePlainText(key.keyId),
-            },
-            removalPolicy: RemovalPolicy.DESTROY,
-        });
-
-        const pubkeyDownloadHandler = new NodejsFunction(key, 'pubkeyDownloadHandler', {
-            entry: `${__dirname}/PubkeyDownloadHandler.ts`,
+        const keyPairGenerator = new NodejsFunction(key, 'keyPairGenerator', {
+            entry: `${__dirname}/KeyPairGenerator.ts`,
             environment: { KEY_ID: key.keyId },
-            logGroup: new LogGroup(key, 'pubkeydDownloadHandler-loggroup', {
+            logGroup: new LogGroup(key, 'keyPairGenerator-loggroup', {
                 retention: RetentionDays.ONE_DAY,
                 removalPolicy: RemovalPolicy.DESTROY,
             })
         });
-        key.grant(pubkeyDownloadHandler, 'kms:GetPublicKey');
+        key.grantEncrypt(keyPairGenerator);
         const provider = new Provider(this, 'provider', {
-            onEventHandler: pubkeyDownloadHandler,
+            onEventHandler: keyPairGenerator,
             logGroup: new LogGroup(this, 'provider-loggroup', {
                 retention: RetentionDays.ONE_DAY,
                 removalPolicy: RemovalPolicy.DESTROY,
             })
         });
-        const pubkeyDownloader = new CustomResource(provider, 'pubkey-downlader', {
+        const keyPair = new CustomResource(provider, 'keyPair', {
             serviceToken: provider.serviceToken,
             removalPolicy: RemovalPolicy.DESTROY
+        });
+        const pubKey = new PublicKey(this, 'pubKey', { encodedKey: keyPair.getAttString('publicKey') });
+        const keyGroup = new KeyGroup(this, 'keyGroup', { items: [pubKey] });
+
+        const secret = new Secret(this, 'secret', {
+            secretObjectValue: {
+                clientSecret: authClient.userPoolClientSecret,
+                clientId: SecretValue.unsafePlainText(authClient.userPoolClientId),
+                callbackUrl: SecretValue.unsafePlainText(callbackUrl),
+                cryptKeyId: SecretValue.unsafePlainText(key.keyId),
+                publicKeyId: SecretValue.unsafePlainText(pubKey.publicKeyId),
+                encryptedPrivateKey: SecretValue.unsafePlainText(keyPair.getAttString('encryptedPrivateKey')),
+            },
+            removalPolicy: RemovalPolicy.DESTROY,
         });
 
         // ==========
@@ -158,13 +162,11 @@ export class YatagarasuStack extends Stack {
         });
 
         secret.grantRead(webapp);
+        key.grantDecrypt(webapp);
 
         // ==========
         // Distribution of webapp
         // ==========
-        const pubKey = new PublicKey(this, 'PublicKey', { encodedKey: pubkeyDownloader.getAttString('publicKey') });
-        const keyGroup = new KeyGroup(this, 'KeyGroup', { items: [pubKey] });
-
         const webappBehaviorOptions = {
             origin: new FunctionUrlOrigin(endpoint),
             allowedMethods: AllowedMethods.ALLOW_ALL,

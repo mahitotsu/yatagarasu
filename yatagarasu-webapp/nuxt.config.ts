@@ -4,11 +4,13 @@ export default defineNuxtConfig({
   nitro: {
     preset: 'aws-lambda',
     serveStatic: false,
+    /*
     minify: true,
     inlineDynamicImports: true,
     externals: {
       inline: ['@aws-sdk', '@aws-lambda-powertoos']
     }
+      */
   },
   runtimeConfig: {
     webDomain: '',
