@@ -10,6 +10,8 @@
     "cdk": "rm -rf ./cdk.out/asset* && cdk --build 'bun run --cwd ../yatagarasu-webapp build'"
   },
   "devDependencies": {
+    "@aws-sdk/client-kms": "^3.637.0",
+    "@types/aws-lambda": "^8.10.145",
     "@types/node": "^20.16.3",
     "aws-cdk": "2.150.0",
     "ts-node": "^10.9.2",

@@ -1,10 +1,11 @@
-import { RemovalPolicy, ScopedAws, SecretValue, Stack, StackProps } from "aws-cdk-lib";
+import { CustomResource, Duration, RemovalPolicy, ScopedAws, SecretValue, Stack, StackProps } from "aws-cdk-lib";
 import { Certificate } from "aws-cdk-lib/aws-certificatemanager";
-import { AllowedMethods, CachePolicy, CfnDistribution, CfnOriginAccessControl, Distribution, OriginRequestPolicy, ResponseHeadersPolicy } from "aws-cdk-lib/aws-cloudfront";
+import { AllowedMethods, CachePolicy, CfnDistribution, CfnOriginAccessControl, Distribution, KeyGroup, OriginRequestPolicy, PublicKey, ResponseHeadersPolicy } from "aws-cdk-lib/aws-cloudfront";
 import { FunctionUrlOrigin, S3Origin } from "aws-cdk-lib/aws-cloudfront-origins";
 import { Mfa, OAuthScope, UserPool } from "aws-cdk-lib/aws-cognito";
 import { Effect, PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
-import { Alias, Architecture, FunctionUrlAuthType, InvokeMode, LayerVersion, LoggingFormat, Runtime } from "aws-cdk-lib/aws-lambda";
+import { Key, KeySpec, KeyUsage } from "aws-cdk-lib/aws-kms";
+import { Architecture, FunctionUrlAuthType, InvokeMode, LayerVersion, LoggingFormat, Runtime } from "aws-cdk-lib/aws-lambda";
 import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { ARecord, PublicHostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
@@ -12,6 +13,7 @@ import { CloudFrontTarget, UserPoolDomainTarget } from "aws-cdk-lib/aws-route53-
 import { BlockPublicAccess, Bucket } from "aws-cdk-lib/aws-s3";
 import { BucketDeployment, Source } from "aws-cdk-lib/aws-s3-deployment";
 import { Secret } from "aws-cdk-lib/aws-secretsmanager";
+import { Provider } from "aws-cdk-lib/custom-resources";
 import { Construct } from "constructs";
 
 export class YatagarasuStack extends Stack {
@@ -63,15 +65,44 @@ export class YatagarasuStack extends Stack {
         });
 
         // ==========
-        // Store secret values
+        // Store key and secrets
         // ==========
-        const secret = new Secret(this, 'Secret', {
+        const key = new Key(this, 'key', {
+            enableKeyRotation: false,
+            keySpec: KeySpec.RSA_2048,
+            keyUsage: KeyUsage.SIGN_VERIFY,
+            removalPolicy: RemovalPolicy.DESTROY,
+            pendingWindow: Duration.days(7),
+        });
+        const secret = new Secret(this, 'secret', {
             secretObjectValue: {
                 clientSecret: authClient.userPoolClientSecret,
                 clientId: SecretValue.unsafePlainText(authClient.userPoolClientId),
                 callbackUrl: SecretValue.unsafePlainText(callbackUrl),
+                signingKeyId: SecretValue.unsafePlainText(key.keyId),
             },
             removalPolicy: RemovalPolicy.DESTROY,
+        });
+
+        const pubkeyDownloadHandler = new NodejsFunction(key, 'pubkeyDownloadHandler', {
+            entry: `${__dirname}/PubkeyDownloadHandler.ts`,
+            environment: { KEY_ID: key.keyId },
+            logGroup: new LogGroup(key, 'pubkeydDownloadHandler-loggroup', {
+                retention: RetentionDays.ONE_DAY,
+                removalPolicy: RemovalPolicy.DESTROY,
+            })
+        });
+        key.grant(pubkeyDownloadHandler, 'kms:GetPublicKey');
+        const provider = new Provider(this, 'provider', {
+            onEventHandler: pubkeyDownloadHandler,
+            logGroup: new LogGroup(this, 'provider-loggroup', {
+                retention: RetentionDays.ONE_DAY,
+                removalPolicy: RemovalPolicy.DESTROY,
+            })
+        });
+        const pubkeyDownloader = new CustomResource(provider, 'pubkey-downlader', {
+            serviceToken: provider.serviceToken,
+            removalPolicy: RemovalPolicy.DESTROY
         });
 
         // ==========
@@ -121,39 +152,46 @@ export class YatagarasuStack extends Stack {
                 removalPolicy: RemovalPolicy.DESTROY,
             }),
         });
-        const current = new Alias(webapp, 'current', {
-            aliasName: 'current',
-            version: webapp.currentVersion,
-        });
-        const endpoint = current.addFunctionUrl({
+        const endpoint = webapp.addFunctionUrl({
             authType: FunctionUrlAuthType.AWS_IAM,
             invokeMode: InvokeMode.BUFFERED,
         });
 
-        secret.grantRead(current);
+        secret.grantRead(webapp);
 
         // ==========
         // Distribution of webapp
         // ==========
+        const pubKey = new PublicKey(this, 'PublicKey', { encodedKey: pubkeyDownloader.getAttString('publicKey') });
+        const keyGroup = new KeyGroup(this, 'KeyGroup', { items: [pubKey] });
+
+        const webappBehaviorOptions = {
+            origin: new FunctionUrlOrigin(endpoint),
+            allowedMethods: AllowedMethods.ALLOW_ALL,
+            cachePolicy: CachePolicy.CACHING_DISABLED,
+            originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            responseHeadersPolicy: ResponseHeadersPolicy.CORS_ALLOW_ALL_ORIGINS_WITH_PREFLIGHT_AND_SECURITY_HEADERS,
+        };
+        const contentsBehaviorOptions = {
+            origin: new S3Origin(content),
+            allowedMethods: AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+            cachePolicy: CachePolicy.CACHING_DISABLED,
+            originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+            responseHeadersPolicy: ResponseHeadersPolicy.CORS_ALLOW_ALL_ORIGINS_WITH_PREFLIGHT_AND_SECURITY_HEADERS,
+        };
+
         const distribution = new Distribution(this, 'distribution', {
-            defaultBehavior: {
-                origin: new FunctionUrlOrigin(endpoint),
-                allowedMethods: AllowedMethods.ALLOW_ALL,
-                cachePolicy: CachePolicy.CACHING_DISABLED,
-                originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
-                responseHeadersPolicy: ResponseHeadersPolicy.CORS_ALLOW_ALL_ORIGINS_WITH_PREFLIGHT_AND_SECURITY_HEADERS
-            },
             additionalBehaviors: {
-                '*.*': {
-                    origin: new S3Origin(content),
-                    allowedMethods: AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
-                    cachePolicy: CachePolicy.CACHING_DISABLED,
-                    originRequestPolicy: OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
-                    responseHeadersPolicy: ResponseHeadersPolicy.CORS_ALLOW_ALL_ORIGINS_WITH_PREFLIGHT_AND_SECURITY_HEADERS
-                }
+                '/oauth2/*': { ...webappBehaviorOptions },
+                'favicon.ico': { ...contentsBehaviorOptions },
+                '*.*': { ...contentsBehaviorOptions, trustedKeyGroups: [keyGroup], },
             },
+            defaultBehavior: { ...webappBehaviorOptions, trustedKeyGroups: [keyGroup], },
             domainNames: [`${www}.${hostedzone.zoneName}`],
             certificate: certificate,
+            errorResponses: [
+                { httpStatus: 403, responseHttpStatus: 403, responsePagePath: '/oauth2/redirectsigninurl' },
+            ]
         });
         const cfnDistribution = distribution.node.defaultChild as CfnDistribution;
 
@@ -167,7 +205,7 @@ export class YatagarasuStack extends Stack {
             }
         });
         cfnDistribution.addPropertyOverride('DistributionConfig.Origins.0.OriginAccessControlId', oacLambda.attrId);
-        current.addPermission('lambda-invocation', {
+        webapp.addPermission('lambda-invocation', {
             principal: new ServicePrincipal('cloudfront.amazonaws.com'),
             action: 'lambda:InvokeFunctionUrl',
             sourceArn: `arn:aws:cloudfront::${accountId}:distribution/${distribution.distributionId}`,

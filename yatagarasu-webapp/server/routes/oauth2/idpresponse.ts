@@ -36,7 +36,5 @@ export default defineEventHandler(async (event) => {
         expires_in: number;
     };
 
-    return JSON.stringify({
-        authDomain, id_token, access_token, token_type, expires_in
-    }, null, 4);
+    return sendRedirect(event, '/', 302);
 });
