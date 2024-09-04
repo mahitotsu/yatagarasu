@@ -1,14 +1,17 @@
 import { getSecret } from '@aws-lambda-powertools/parameters/secrets';
 import { DecryptCommand, KMSClient } from '@aws-sdk/client-kms';
 import { CloudfrontSignedCookiesOutput, getSignedCookies } from '@aws-sdk/cloudfront-signer';
+import { CognitoJwtVerifier } from 'aws-jwt-verify';
+import { CognitoIdTokenPayload } from 'aws-jwt-verify/jwt-model';
 
 
 const webDomain = process.env.YTG_WEB_DOMAIN!;
 const authDomain = process.env.YTG_AUTH_DOMAIN!;
 const secretName = process.env.YTG_SECRET_NAME!;
 
-const { clientSecret, clientId, callbackUrl, cryptKeyId, publicKeyId, encryptedPrivateKey }
+const { userPoolId, clientSecret, clientId, callbackUrl, cryptKeyId, publicKeyId, encryptedPrivateKey }
     = await getSecret(secretName, { transform: 'json' }) as {
+        userPoolId: string;
         clientSecret: string;
         clientId: string;
         callbackUrl: string;
@@ -16,9 +19,8 @@ const { clientSecret, clientId, callbackUrl, cryptKeyId, publicKeyId, encryptedP
         publicKeyId: string;
         encryptedPrivateKey: string;
     };
-const tokenEndpoint = `https://${authDomain}/oauth2/token`;
-const kmsClient = new KMSClient();
 
+const tokenEndpoint = `https://${authDomain}/oauth2/token`;
 interface CognitoTokenEndpointResponse {
     id_token: string;
     access_token: string;
@@ -26,6 +28,10 @@ interface CognitoTokenEndpointResponse {
     token_type: string;
     expires_in: number;
 };
+
+const jwtVerifier = CognitoJwtVerifier.create({ userPoolId, tokenUse: 'id', clientId, });
+const kmsClient = new KMSClient();
+const runtimeConfig = useRuntimeConfig();
 
 const fetchTokens = async (code: string, callbackUrl: string): Promise<CognitoTokenEndpointResponse> => {
     return $fetch(tokenEndpoint, {
@@ -40,6 +46,10 @@ const fetchTokens = async (code: string, callbackUrl: string): Promise<CognitoTo
             `redirect_uri=${callbackUrl}`
         ].join('&'),
     });
+}
+
+const verifyIdToken = async (idToken: string): Promise<CognitoIdTokenPayload> => {
+    return jwtVerifier.verify(idToken);
 }
 
 const decodePrivateKey = async (): Promise<string> => {
@@ -80,8 +90,13 @@ export default defineEventHandler(async (event) => {
     }
 
     const { id_token, access_token, token_type, expires_in } = await fetchTokens(code.toString(), callbackUrl);
-    const cookies = await buildCloudfrontSignedCookies(expires_in);
+    const idTokenPayload = await verifyIdToken(id_token);
+    const session = await useSession(event, {
+        password: runtimeConfig.sessionPassword,
+        cookie: { httpOnly: true, secure: true, sameSite: 'strict' },
+    });
 
+    const cookies = await buildCloudfrontSignedCookies(expires_in);
     const options = {
         domain: webDomain,
         path: '/',

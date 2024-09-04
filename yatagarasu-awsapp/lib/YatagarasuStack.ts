@@ -102,6 +102,7 @@ export class YatagarasuStack extends Stack {
 
         const secret = new Secret(this, 'secret', {
             secretObjectValue: {
+                userPoolId: SecretValue.unsafePlainText(userpool.userPoolId),
                 clientSecret: authClient.userPoolClientSecret,
                 clientId: SecretValue.unsafePlainText(authClient.userPoolClientId),
                 callbackUrl: SecretValue.unsafePlainText(callbackUrl),
