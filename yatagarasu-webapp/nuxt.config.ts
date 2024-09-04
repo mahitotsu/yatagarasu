@@ -4,17 +4,13 @@ export default defineNuxtConfig({
   nitro: {
     preset: 'aws-lambda',
     serveStatic: false,
-    /*
-    minify: true,
     inlineDynamicImports: true,
-    externals: {
-      inline: ['@aws-sdk', '@aws-lambda-powertoos']
+    esbuild: {
+      options: {
+        target: 'esnext'
+      }
     }
-      */
   },
   runtimeConfig: {
-    webDomain: '',
-    authDomain: '',
-    secretName: '',
   }
 });

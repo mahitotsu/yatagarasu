@@ -1,9 +1,14 @@
 <template>
-  <div>
-    <NuxtRouteAnnouncer />
-    <NuxtLoadingIndicator />
-    <NaxtLayout>
-      <NuxtPage />
-    </NaxtLayout>
-  </div>
+  <NuxtRouteAnnouncer />
+  <NuxtLoadingIndicator />
+  <header>
+    <nav>
+      <ul>
+        <li><a href="/oauth2/signout">sign-out</a></li>
+      </ul>
+    </nav>
+  </header>
+  <main>
+    <NuxtPage />
+  </main>
 </template>

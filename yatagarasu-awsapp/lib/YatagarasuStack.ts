@@ -6,7 +6,7 @@ import { Mfa, OAuthScope, UserPool } from "aws-cdk-lib/aws-cognito";
 import { Effect, PolicyStatement, ServicePrincipal } from "aws-cdk-lib/aws-iam";
 import { Key, KeySpec, KeyUsage } from "aws-cdk-lib/aws-kms";
 import { Architecture, FunctionUrlAuthType, InvokeMode, LayerVersion, LoggingFormat, Runtime } from "aws-cdk-lib/aws-lambda";
-import { NodejsFunction } from "aws-cdk-lib/aws-lambda-nodejs";
+import { NodejsFunction, OutputFormat } from "aws-cdk-lib/aws-lambda-nodejs";
 import { LogGroup, RetentionDays } from "aws-cdk-lib/aws-logs";
 import { ARecord, PublicHostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
 import { CloudFrontTarget, UserPoolDomainTarget } from "aws-cdk-lib/aws-route53-targets";
@@ -49,16 +49,19 @@ export class YatagarasuStack extends Stack {
             },
         });
         const callbackUrl = `https://${www}.${hostedzone.zoneName}/oauth2/idpresponse`;
+        const logoutUrl = `https://${www}.${hostedzone.zoneName}/`;
         const authClient = userpool.addClient('client', {
             generateSecret: true,
             oAuth: {
                 flows: { authorizationCodeGrant: true, implicitCodeGrant: false },
                 scopes: [OAuthScope.EMAIL, OAuthScope.OPENID],
                 callbackUrls: [callbackUrl],
+                logoutUrls: [logoutUrl],
             },
+
         });
 
-        const authRecord = new ARecord(authDomain, 'record', {
+        new ARecord(authDomain, 'record', {
             zone: hostedzone,
             recordName: auth,
             target: RecordTarget.fromAlias(new UserPoolDomainTarget(authDomain)),
@@ -67,22 +70,22 @@ export class YatagarasuStack extends Stack {
         // ==========
         // Store key and secrets
         // ==========
-        const key = new Key(this, 'cryptKey', {
+        const cryptKey = new Key(this, 'cryptKey', {
             enableKeyRotation: false,
             keySpec: KeySpec.SYMMETRIC_DEFAULT,
             keyUsage: KeyUsage.ENCRYPT_DECRYPT,
             removalPolicy: RemovalPolicy.DESTROY,
             pendingWindow: Duration.days(7),
         });
-        const keyPairGenerator = new NodejsFunction(key, 'keyPairGenerator', {
+        const keyPairGenerator = new NodejsFunction(cryptKey, 'keyPairGenerator', {
             entry: `${__dirname}/KeyPairGenerator.ts`,
-            environment: { KEY_ID: key.keyId },
-            logGroup: new LogGroup(key, 'keyPairGenerator-loggroup', {
+            environment: { KEY_ID: cryptKey.keyId },
+            logGroup: new LogGroup(cryptKey, 'keyPairGenerator-loggroup', {
                 retention: RetentionDays.ONE_DAY,
                 removalPolicy: RemovalPolicy.DESTROY,
             })
         });
-        key.grantEncrypt(keyPairGenerator);
+        cryptKey.grantEncrypt(keyPairGenerator);
         const provider = new Provider(this, 'provider', {
             onEventHandler: keyPairGenerator,
             logGroup: new LogGroup(this, 'provider-loggroup', {
@@ -102,7 +105,7 @@ export class YatagarasuStack extends Stack {
                 clientSecret: authClient.userPoolClientSecret,
                 clientId: SecretValue.unsafePlainText(authClient.userPoolClientId),
                 callbackUrl: SecretValue.unsafePlainText(callbackUrl),
-                cryptKeyId: SecretValue.unsafePlainText(key.keyId),
+                cryptKeyId: SecretValue.unsafePlainText(cryptKey.keyId),
                 publicKeyId: SecretValue.unsafePlainText(pubKey.publicKeyId),
                 encryptedPrivateKey: SecretValue.unsafePlainText(keyPair.getAttString('encryptedPrivateKey')),
             },
@@ -139,14 +142,15 @@ export class YatagarasuStack extends Stack {
             architecture: Architecture.ARM_64,
             entry: `${__dirname}/../../yatagarasu-webapp/.output/server/index.mjs`,
             environment: {
-                NUXT_WEB_DOMAIN: `${www}.${hostedzone.zoneName}`,
-                NUXT_AUTH_DOMAIN: `${auth}.${hostedzone.zoneName}`,
-                NUXT_SECRET_NAME: secret.secretName,
+                YTG_WEB_DOMAIN: `${www}.${hostedzone.zoneName}`,
+                YTG_AUTH_DOMAIN: `${auth}.${hostedzone.zoneName}`,
+                YTG_SECRET_NAME: secret.secretName,
             },
             bundling: {
                 minify: true,
                 sourceMap: false,
                 externalModules: ['@aws-lambda-powertools/*', '@aws-sdk/*',],
+                format: OutputFormat.ESM,
             },
             layers: [powertools],
             memorySize: 1024,
@@ -162,7 +166,7 @@ export class YatagarasuStack extends Stack {
         });
 
         secret.grantRead(webapp);
-        key.grantDecrypt(webapp);
+        cryptKey.grantDecrypt(webapp);
 
         // ==========
         // Distribution of webapp
@@ -192,7 +196,7 @@ export class YatagarasuStack extends Stack {
             domainNames: [`${www}.${hostedzone.zoneName}`],
             certificate: certificate,
             errorResponses: [
-                { httpStatus: 403, responseHttpStatus: 403, responsePagePath: '/oauth2/redirectsigninurl' },
+                { httpStatus: 403, responseHttpStatus: 403, responsePagePath: '/oauth2/signin' },
             ]
         });
         const cfnDistribution = distribution.node.defaultChild as CfnDistribution;
