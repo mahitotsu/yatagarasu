@@ -3,6 +3,7 @@ import { DecryptCommand, KMSClient } from '@aws-sdk/client-kms';
 import { CloudfrontSignedCookiesOutput, getSignedCookies } from '@aws-sdk/cloudfront-signer';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { CognitoIdTokenPayload } from 'aws-jwt-verify/jwt-model';
+import { saveSessionData } from '~/utils/session-controller';
 
 
 const webDomain = process.env.YTG_WEB_DOMAIN!;
@@ -31,7 +32,6 @@ interface CognitoTokenEndpointResponse {
 
 const jwtVerifier = CognitoJwtVerifier.create({ userPoolId, tokenUse: 'id', clientId, });
 const kmsClient = new KMSClient();
-const runtimeConfig = useRuntimeConfig();
 
 const fetchTokens = async (code: string, callbackUrl: string): Promise<CognitoTokenEndpointResponse> => {
     return $fetch(tokenEndpoint, {
@@ -91,10 +91,8 @@ export default defineEventHandler(async (event) => {
 
     const { id_token, access_token, token_type, expires_in } = await fetchTokens(code.toString(), callbackUrl);
     const idTokenPayload = await verifyIdToken(id_token);
-    const session = await useSession(event, {
-        password: runtimeConfig.sessionPassword,
-        cookie: { httpOnly: true, secure: true, sameSite: 'strict' },
-    });
+    const data = saveSessionData(event, { email: idTokenPayload['email'] as string, username: idTokenPayload['cognito:username'] });
+    console.log(data);
 
     const cookies = await buildCloudfrontSignedCookies(expires_in);
     const options = {

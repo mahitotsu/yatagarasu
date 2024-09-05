@@ -1,4 +1,5 @@
 import { getSecret } from "@aws-lambda-powertools/parameters/secrets";
+import { clearSessionData } from "~/utils/session-controller";
 
 const webDomain = process.env.YTG_WEB_DOMAIN!;
 const authDomain = process.env.YTG_AUTH_DOMAIN!;
@@ -14,6 +15,8 @@ signoutUrl.searchParams.append('client_id', clientId);
 signoutUrl.searchParams.append('logout_uri', `https://${webDomain}/`);
 
 export default defineEventHandler(async (event) => {
+
+    clearSessionData(event);
 
     const options = {
         domain: webDomain,
