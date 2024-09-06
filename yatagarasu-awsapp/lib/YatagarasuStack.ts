@@ -109,6 +109,7 @@ export class YatagarasuStack extends Stack {
                 cryptKeyId: SecretValue.unsafePlainText(cryptKey.keyId),
                 publicKeyId: SecretValue.unsafePlainText(pubKey.publicKeyId),
                 encryptedPrivateKey: SecretValue.unsafePlainText(keyPair.getAttString('encryptedPrivateKey')),
+                sessionPassword: SecretValue.unsafePlainText(Array.from({ length: 64 }, () => Math.random().toString(36)[2]).join('')),
             },
             removalPolicy: RemovalPolicy.DESTROY,
         });

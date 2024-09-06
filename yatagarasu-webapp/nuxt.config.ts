@@ -12,6 +12,5 @@ export default defineNuxtConfig({
     }
   },
   runtimeConfig: {
-    sessionPassword: Array.from({ length: 64 }, () => Math.random().toString(36)[2]).join(''),
   }
 });

@@ -1,25 +1,17 @@
-import { getSecret } from '@aws-lambda-powertools/parameters/secrets';
 import { DecryptCommand, KMSClient } from '@aws-sdk/client-kms';
 import { CloudfrontSignedCookiesOutput, getSignedCookies } from '@aws-sdk/cloudfront-signer';
 import { CognitoJwtVerifier } from 'aws-jwt-verify';
 import { CognitoIdTokenPayload } from 'aws-jwt-verify/jwt-model';
+import { getSecretValues } from '~/utils/secret-values';
 import { saveSessionData } from '~/utils/session-controller';
 
 
 const webDomain = process.env.YTG_WEB_DOMAIN!;
 const authDomain = process.env.YTG_AUTH_DOMAIN!;
-const secretName = process.env.YTG_SECRET_NAME!;
 
-const { userPoolId, clientSecret, clientId, callbackUrl, cryptKeyId, publicKeyId, encryptedPrivateKey }
-    = await getSecret(secretName, { transform: 'json' }) as {
-        userPoolId: string;
-        clientSecret: string;
-        clientId: string;
-        callbackUrl: string;
-        cryptKeyId: string;
-        publicKeyId: string;
-        encryptedPrivateKey: string;
-    };
+const {
+    userPoolId, clientSecret, clientId, callbackUrl, cryptKeyId, publicKeyId, encryptedPrivateKey
+} = getSecretValues();
 
 const tokenEndpoint = `https://${authDomain}/oauth2/token`;
 interface CognitoTokenEndpointResponse {
@@ -91,8 +83,7 @@ export default defineEventHandler(async (event) => {
 
     const { id_token, access_token, token_type, expires_in } = await fetchTokens(code.toString(), callbackUrl);
     const idTokenPayload = await verifyIdToken(id_token);
-    const data = saveSessionData(event, { email: idTokenPayload['email'] as string, username: idTokenPayload['cognito:username'] });
-    console.log(data);
+    await saveSessionData(event, { email: idTokenPayload['email'] as string, username: idTokenPayload['cognito:username'] });
 
     const cookies = await buildCloudfrontSignedCookies(expires_in);
     const options = {
