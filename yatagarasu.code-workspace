@@ -1,0 +1,13 @@
+{
+    "folders": [
+        {
+            "path": "."
+        },
+        {
+            "path": "yatagarasu-webapp"
+        },
+        {
+            "path": "yatagarasu-awsapp"
+        }
+    ]
+}
