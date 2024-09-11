@@ -1,4 +1,3 @@
 <template>
-    <h1>List of decisions</h1>
-    <DecisionList />
+    <div>Redirect to default application page ...</div>
 </template>
