@@ -18,6 +18,10 @@ const deleteDecision = async () => {
             <button>List</button>
         </NuxtLink>
         &nbsp;|&nbsp;
+        <NuxtLink :to="{ path: './view', query: { id: decision?.id } }">
+            <button :disabled="!decision || !decision.id">View</button>
+        </NuxtLink>
+        &nbsp;|&nbsp;
         <button :disabled="!decision" @click.prevent="saveDecision">Save</button>
         &nbsp;|&nbsp;
         <button :disabled="!decision || !decision.id" @click.prevent="deleteDecision">Delete</button>
