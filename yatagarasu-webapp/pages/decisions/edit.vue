@@ -1,15 +1,14 @@
 <script setup lang="ts">
-const id = useRoute().query.id;
-const { data: decision, refresh } = await useFetch('/api/decisions/get', { method: 'POST', body: { id } });
+const body = ref({ id: useRoute().query.id });
+const { data: decision } = await useFetch('/api/decisions/get', { method: 'POST', body, watch: [body] });
 
 const saveDecision = async () => {
-    useFetch('/api/decisions/save', { method: 'POST', body: decision.value })
-        .then(r => refresh());
+    $fetch('/api/decisions/save', { method: 'POST', body: JSON.stringify(decision.value) })
+        .then(saved => body.value.id = saved.id)
 }
 const deleteDecision = async () => {
-    useFetch('/api/decisions/delete', { method: 'POST', body: { id } })
-        .then(r => decision.value = null)
-        .then(r => useRouter().push('./list'));
+    $fetch('/api/decisions/delete', { method: 'POST', body: JSON.stringify({ id: body.value.id }) })
+        .then(() => useRouter().push('./list'));
 }
 </script>
 
@@ -21,7 +20,7 @@ const deleteDecision = async () => {
         &nbsp;|&nbsp;
         <button :disabled="!decision" @click.prevent="saveDecision">Save</button>
         &nbsp;|&nbsp;
-        <button :disabled="!decision" @click.prevent="deleteDecision">Delete</button>
+        <button :disabled="!decision || !decision.id" @click.prevent="deleteDecision">Delete</button>
     </div>
     <div v-if="decision">
         <pre>{{ JSON.stringify(decision, null, 4) }}</pre>

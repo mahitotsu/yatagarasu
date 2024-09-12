@@ -1,10 +1,10 @@
 <script setup lang="ts">
-const { data: list } = await useFetch('/api/decisions/list', { method: 'POST' });
+const list = await $fetch('/api/decisions/list', { method: 'POST' });
 </script>
 
 <template>
     <div>
-        <NuxtLink to="./create"><button>Create</button></NuxtLink>
+        <NuxtLink to="./edit"><button>Create</button></NuxtLink>
     </div>
     <table v-if="list">
         <thead>
